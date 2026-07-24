@@ -53,7 +53,7 @@ module emu
         .rst               (1'b0),
         .outclk_0          (pix_clk),     // 25.0 MHz  (VERA VGA)
         .outclk_1          (aud_mclk),    // 12.5 MHz  (IKAOPM)
-        .outclk_2          (cpu_clk),     // 8.0 MHz   (CPU + VIA + I2C)
+        .outclk_2          (cpu_clk),     // 8.0 MHz   (Peripherals, VIA, I2C, SPI)
         .outclk_3          (sdram_clk),   // 100.0 MHz (SDRAM controller)
         .locked            (pll_locked)
     );
@@ -138,7 +138,6 @@ module emu
         "F2,BINROM,Load Cart;",   // ioctl_index = 2 -> a cart ROM image into bank 32+ (run it)
         "-;",
         "O[1],CPU,65C816,65C02;", // status[1] -> cpu02_sel (latched in reset)
-        "O[7:6],CPU Speed,1x (8 MHz),2x (16 MHz),4x (32 MHz);",
         "O[2],MiSTer UART,$9FE0,$9FE8;", // fixed host-UART guest address
         "-;",
         "O[5],VERA2 Bitmap Layer,Off,On;", // status[5] master-enable: SDRAM 640x480 4/8bpp bitmap ($9F60). Moved off O[2] -- that's the serial card's MiSTer UART selector.
@@ -150,23 +149,6 @@ module emu
     };
 
     wire [127:0] status;
-
-    // ========================================================================
-    // CPU Speed Selection & Clock Enables (1x = 8 MHz, 2x = 16 MHz, 4x = 32 MHz)
-    // ========================================================================
-    reg [1:0] speed_cnt = 2'd0;
-    always @(posedge cpu_clk or negedge sys_rst_n) begin
-        if (!sys_rst_n) speed_cnt <= 2'd0;
-        else            speed_cnt <= speed_cnt + 2'd1;
-    end
-
-    wire ce_1x = (speed_cnt == 2'd0);          // 8 MHz  (1 out of 4 cycles)
-    wire ce_2x = (speed_cnt[0] == 1'b0);       // 16 MHz (2 out of 4 cycles)
-    wire ce_4x = 1'b1;                         // 32 MHz (4 out of 4 cycles)
-
-    wire [1:0] cpu_speed_sel = status[7:6];
-    wire cpu_ce = (cpu_speed_sel == 2'b00) ? ce_1x :
-                  (cpu_speed_sel == 2'b01) ? ce_2x : ce_4x;
     wire [1:0]   buttons;
     wire         forced_scandoubler;
     wire         direct_video;
@@ -426,7 +408,7 @@ module emu
         .din_in (cpu_di),
         .irq_n  (cpu_irq_n),
         .nmi_n  (cpu_nmi_n),
-        .rdy_in (cpu_rdy & cpu_ce),
+        .rdy_in (cpu_rdy),
         .din_out(cpu_di_wai),
         .rdy_out(cpu_rdy_wai)
     );
@@ -479,7 +461,7 @@ module emu
     wire        rwn816, sync816, vpb816, bv816;
     p65c816_wrap u_cpu816 (
         .clk      (cpu_clk),
-        .enable   (cpu_rdy & cpu_ce),
+        .enable   (cpu_rdy),
         .res_n    (cpu_reset_n & ~cpu02_sel),
         .irq_n    (cpu_irq_n),
         .nmi_n    (cpu_nmi_n),
@@ -510,7 +492,7 @@ module emu
         .din_in (cpu_di),
         .irq_n  (cpu_irq_n),
         .nmi_n  (cpu_nmi_n),
-        .rdy_in (cpu_rdy & cpu_ce),
+        .rdy_in (cpu_rdy),
         .din_out(di02_wai),
         .rdy_out(rdy02_wai)
     );
@@ -1368,7 +1350,6 @@ module emu
     via65c22 u_via1 (
         .clk     (cpu_clk),
         .reset_n (cpu_reset_n),
-        .ce      (ce_1x),
         .cs      (via1_cs),
         .rwn     (cpu_rwn),
         .enable  (cpu_rdy),
@@ -1410,7 +1391,6 @@ module emu
     via65c22 u_via2 (
         .clk     (cpu_clk),
         .reset_n (cpu_reset_n),
-        .ce      (ce_1x),
         .cs      (via2_cs),
         .rwn     (cpu_rwn),
         .enable  (cpu_rdy),
@@ -1476,8 +1456,8 @@ module emu
     end
 
     x16_serial_card #(
-        .CLK_HZ         (32_000_000),
-        .DEFAULT_DIVISOR(16'd32)
+        .CLK_HZ         (8_000_000),
+        .DEFAULT_DIVISOR(16'd8)
     ) u_serial0 (
         .clk      (cpu_clk),
         .reset_n  (serial_reset_n),
@@ -1497,8 +1477,8 @@ module emu
     );
 
     x16_serial_card #(
-        .CLK_HZ         (32_000_000),
-        .DEFAULT_DIVISOR(16'd32)
+        .CLK_HZ         (8_000_000),
+        .DEFAULT_DIVISOR(16'd8)
     ) u_serial1 (
         .clk      (cpu_clk),
         .reset_n  (serial_reset_n),
